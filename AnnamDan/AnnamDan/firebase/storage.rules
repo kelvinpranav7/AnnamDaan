@@ -1,0 +1,38 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() {
+      return isSignedIn() &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    function maxImage() {
+      return request.resource.size < 8 * 1024 * 1024 &&
+             request.resource.contentType.matches('image/.*');
+    }
+
+    // FSSAI license uploads — donors only, their own folder
+    match /licenses/{uid}/{file=**} {
+      allow read: if request.auth.uid == uid || isAdmin();
+      allow write: if request.auth.uid == uid && maxImage();
+    }
+
+    // Food images — signed-in donor
+    match /donations/{uid}/{file=**} {
+      allow read: if isSignedIn();
+      allow write: if request.auth.uid == uid && maxImage();
+    }
+
+    // Avatars
+    match /avatars/{uid}/{file=**} {
+      allow read: if true;
+      allow write: if request.auth.uid == uid && maxImage();
+    }
+
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,106 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- Helpers ----
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isRole(role) {
+      return isSignedIn() && userRole() == role;
+    }
+    function isAdmin() {
+      return isRole('admin');
+    }
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ---- Users ----
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isSignedIn() && request.auth.uid == uid;
+      allow update: if isOwner(uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ---- Donations ----
+    match /donations/{id} {
+      allow read: if isSignedIn();
+      allow create: if isRole('donor') &&
+                     request.resource.data.donorId == request.auth.uid &&
+                     request.resource.data.status == 'live';
+      allow update: if isAdmin() ||
+                     (isOwner(resource.data.donorId)) ||
+                     (isRole('ngo') &&
+                      (resource.data.status == 'live' ||
+                       resource.data.assignedNgoId == request.auth.uid)) ||
+                     (isRole('volunteer') &&
+                      resource.data.assignedVolunteerId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // ---- NGOs ----
+    match /ngos/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (isRole('ngo') && request.auth.uid == id);
+    }
+
+    // ---- Volunteers ----
+    match /volunteers/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isOwner(id);
+    }
+
+    // ---- Pickups ----
+    match /pickups/{id} {
+      allow read: if isSignedIn();
+      allow create: if isRole('ngo') || isRole('volunteer') || isAdmin();
+      allow update: if isAdmin() ||
+                     (isRole('ngo') && resource.data.ngoId == request.auth.uid) ||
+                     (isRole('volunteer') && resource.data.volunteerId == request.auth.uid);
+    }
+
+    // ---- Notifications ----
+    match /notifications/{id} {
+      allow read, update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isAdmin();
+    }
+
+    // ---- Trust needs ----
+    match /trustNeeds/{id} {
+      allow read: if true;
+      allow create, update: if isRole('ngo') &&
+        request.resource.data.ngoId == request.auth.uid;
+      allow delete: if isAdmin() ||
+        (isRole('ngo') && resource.data.ngoId == request.auth.uid);
+    }
+
+    // ---- Contributions (public users) ----
+    match /contributions/{id} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+        request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // ---- Analytics + AI results ----
+    match /analytics/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /aiResults/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
